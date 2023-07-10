@@ -17,6 +17,7 @@ namespace RetryPoc.Controllers
         private static int RequestId = 1;
         private static List<RequestMessageObject> _requestMessageObjects = new();
         private static List<FailedEventObject> _failedEvents = new();
+        private const int DelayIntervalSec = 10;
 
         public PocController(ICapPublisher capPublisher, IConfiguration configuration)
         {
@@ -81,7 +82,7 @@ namespace RetryPoc.Controllers
 
         [NonAction]
         [CapSubscribe("workload-service-requests-poc")]
-        public void NewMessageRequestReceiver(RequestMessageObject messageObject)
+        public async Task NewMessageRequestReceiver(RequestMessageObject messageObject)
         {
             var methodName = "NewMessageRequestReceiver";
 
@@ -89,9 +90,35 @@ namespace RetryPoc.Controllers
             {
                 messageObject.MtoaId = Guid.NewGuid();
 
-                Debug.WriteLine($"{methodName}: Created --> Request Id: {messageObject.Id}, Mtoa Id: {messageObject.MtoaId}");
+                if (_requestMessageObjects.All(o => o.Id != messageObject.Id))
+                {
+                    //this is a new request
 
-                _requestMessageObjects.Add(messageObject);
+                    Debug.WriteLine($"{methodName}: Created --> Request Id: {messageObject.Id}, Mtoa Id: {messageObject.MtoaId}");
+
+                    _requestMessageObjects.Add(messageObject);
+                }
+                else
+                {
+                    //if the request already exists inside database - then this is a successfull retrying message
+
+                    _requestMessageObjects.ForEach(o =>
+                    {
+                        if (o.Id == messageObject.Id)
+                        {
+                            o.MtoaId = Guid.NewGuid();
+                        }
+                    });
+
+                    //check if there are messages following the creation of the new request 
+                    foreach (var failedEvent in _failedEvents.Where(e => e.ParentRequestId == messageObject.Id).OrderBy(e => e.OrderInQueue))
+                    {
+                        await _capPublisher.PublishDelayAsync(
+                           TimeSpan.FromSeconds(failedEvent.OrderInQueue * DelayIntervalSec),
+                            failedEvent.TopicNameForPublish,
+                            JsonSerializer.Deserialize(failedEvent.FailedEventValue, Type.GetType(failedEvent.FailedEventTypeName)));
+                    }
+                }
             }
             else
             {
@@ -109,7 +136,7 @@ namespace RetryPoc.Controllers
 
         [NonAction]
         [CapSubscribe("workload-requests-change-status-poc")]
-        public void RequestStatusChangeReceiver(RequestMessageChangeStatusObject messageObject)
+        public async Task RequestStatusChangeReceiver(RequestMessageChangeStatusObject messageObject)
         {
             var methodName = "RequestStatusChangeReceiver";
 
@@ -118,6 +145,7 @@ namespace RetryPoc.Controllers
             {
                 Debug.WriteLine($"{methodName}: Request Id: {messageObject.Id} have no MTOA ID. The status change is impossible.");
 
+                //////////TODO: duplicated code with next else
                 var currentMax = _failedEvents != null && _failedEvents.Any(o => o.ParentRequestId == messageObject.Id) ? _failedEvents.Where(o => o.ParentRequestId == messageObject.Id)?.Max(o => o.OrderInQueue) : 0;
 
                 var failedEvent = new FailedEventObject
@@ -126,8 +154,10 @@ namespace RetryPoc.Controllers
                     FailedEventValue = JsonSerializer.Serialize(messageObject),
                     FailedEventTypeName = messageObject.GetType().Name,
                     TimeStamp = DateTimeOffset.Now,
-                    OrderInQueue = (int)(currentMax != null ? currentMax + 1 : 0)
+                    OrderInQueue = (int)(currentMax != null ? currentMax + 1 : 0),
+                    TopicNameForPublish = _configuration.GetValue<string>("Cap:RequestsChangeStatisTopicName")
                 };
+                ////////////////////////////
 
                 if (_failedEvents == null)
                 {
@@ -138,15 +168,42 @@ namespace RetryPoc.Controllers
             }
             else
             {
-                Debug.WriteLine($"{methodName}: Status Changed --> Request Id:{messageObject.Id}, New Status: {messageObject.NewStatus}");
-
-                _requestMessageObjects.ForEach(o =>
+                if (_failedEvents.Any(e => e.ParentRequestId == messageObject.Id))
                 {
-                    if (o.Id == messageObject.Id)
+                    var currentMax = _failedEvents != null && _failedEvents.Any(o => o.ParentRequestId == messageObject.Id) ? _failedEvents.Where(o => o.ParentRequestId == messageObject.Id)?.Max(o => o.OrderInQueue) : 0;
+
+                    var newFailedEvent = new FailedEventObject
                     {
-                        o.Status = messageObject.NewStatus;
+                        ParentRequestId = messageObject.Id,
+                        FailedEventValue = JsonSerializer.Serialize(messageObject),
+                        FailedEventTypeName = messageObject.GetType().Name,
+                        TimeStamp = DateTimeOffset.Now,
+                        OrderInQueue = (int)(currentMax != null ? currentMax + 1 : 0),
+                        TopicNameForPublish = _configuration.GetValue<string>("Cap:RequestsChangeStatisTopicName")
+                    };
+                    _failedEvents.Add(newFailedEvent);
+
+                    //check if there are messages following the creation of the new request 
+                    foreach (var failedEvent in _failedEvents.Where(e => e.ParentRequestId == messageObject.Id).OrderBy(e => e.OrderInQueue))
+                    {
+                        await _capPublisher.PublishDelayAsync(
+                           TimeSpan.FromSeconds(failedEvent.OrderInQueue * DelayIntervalSec),
+                            failedEvent.TopicNameForPublish,
+                            JsonSerializer.Deserialize(failedEvent.FailedEventValue, Type.GetType(failedEvent.FailedEventTypeName)));
                     }
-                });
+                }
+                else
+                {
+                    Debug.WriteLine($"{methodName}: Status Changed --> Request Id:{messageObject.Id}, New Status: {messageObject.NewStatus}");
+
+                    _requestMessageObjects.ForEach(o =>
+                    {
+                        if (o.Id == messageObject.Id)
+                        {
+                            o.Status = messageObject.NewStatus;
+                        }
+                    });
+                }
             }
         }
 
