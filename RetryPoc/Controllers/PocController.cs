@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using RetryPoc.Application.Enums;
 using RetryPoc.Application.Models;
 using System.Diagnostics;
+using System.Text.Json;
 
 namespace RetryPoc.Controllers
 {
@@ -14,7 +15,8 @@ namespace RetryPoc.Controllers
         private readonly IConfiguration _configuration;
         private static bool _isProcessingNewRequests = true;
         private static int RequestId = 1;
-        private static List<RequestMessageObject> _requestMessageObjects = new List<RequestMessageObject>();
+        private static List<RequestMessageObject> _requestMessageObjects = new();
+        private static List<FailedEventObject> _failedEvents = new();
 
         public PocController(ICapPublisher capPublisher, IConfiguration configuration)
         {
@@ -63,10 +65,16 @@ namespace RetryPoc.Controllers
             return Accepted(value: "New Request processor is down...");
         }
 
-        [HttpGet("list")]
+        [HttpGet("list-requests")]
         public IActionResult ListAllRequests()
         {
             return Ok(_requestMessageObjects);
+        }
+
+        [HttpGet("list-failed-events")]
+        public IActionResult ListAllFailedEvents()
+        {
+            return Ok(_failedEvents);
         }
 
         #region Receivers
@@ -75,20 +83,25 @@ namespace RetryPoc.Controllers
         [CapSubscribe("workload-service-requests-poc")]
         public void NewMessageRequestReceiver(RequestMessageObject messageObject)
         {
+            var methodName = "NewMessageRequestReceiver";
+
             if (_isProcessingNewRequests)
             {
                 messageObject.MtoaId = Guid.NewGuid();
 
-                Debug.WriteLine($"NewMessageRequestReceiver: Created --> Request Id: {messageObject.Id}, Mtoa Id: {messageObject.MtoaId}");
+                Debug.WriteLine($"{methodName}: Created --> Request Id: {messageObject.Id}, Mtoa Id: {messageObject.MtoaId}");
 
                 _requestMessageObjects.Add(messageObject);
             }
             else
             {
                 //add new request to database anyways, without MTOA ID
-                _requestMessageObjects.Add(messageObject);
+                if (_requestMessageObjects.All(o => o.Id != messageObject.Id))
+                {
+                    _requestMessageObjects.Add(messageObject);
+                }
 
-                Debug.WriteLine($"NewMessageRequestReceiver: The processing is not functional! Timestamp: {DateTime.Now}", "Error");
+                Debug.WriteLine($"{methodName}: The processing is not functional! Timestamp: {DateTime.Now}", "Error");
 
                 throw new InvalidOperationException($"Invalid operation exception was thrown at {DateTime.Now}");
             }
@@ -98,15 +111,43 @@ namespace RetryPoc.Controllers
         [CapSubscribe("workload-requests-change-status-poc")]
         public void RequestStatusChangeReceiver(RequestMessageChangeStatusObject messageObject)
         {
-            Debug.WriteLine($"RequestStatusChangeReceiver: Status Changed --> Request Id:{messageObject.Id}, New Status: {messageObject.NewStatus}");
+            var methodName = "RequestStatusChangeReceiver";
 
-            _requestMessageObjects.ForEach(o =>
+            //check for Mtoa Id
+            if (_requestMessageObjects.Any(o => o.Id == messageObject.Id && o.MtoaId == Guid.Empty))
             {
-                if (o.Id == messageObject.Id)
+                Debug.WriteLine($"{methodName}: Request Id: {messageObject.Id} have no MTOA ID. The status change is impossible.");
+
+                var currentMax = _failedEvents != null && _failedEvents.Any(o => o.ParentRequestId == messageObject.Id) ? _failedEvents.Where(o => o.ParentRequestId == messageObject.Id)?.Max(o => o.OrderInQueue) : 0;
+
+                var failedEvent = new FailedEventObject
                 {
-                    o.Status = messageObject.NewStatus;
+                    ParentRequestId = messageObject.Id,
+                    FailedEventValue = JsonSerializer.Serialize(messageObject),
+                    FailedEventTypeName = messageObject.GetType().Name,
+                    TimeStamp = DateTimeOffset.Now,
+                    OrderInQueue = (int)(currentMax != null ? currentMax + 1 : 0)
+                };
+
+                if (_failedEvents == null)
+                {
+                    _failedEvents = new();
                 }
-            });
+
+                _failedEvents.Add(failedEvent);
+            }
+            else
+            {
+                Debug.WriteLine($"{methodName}: Status Changed --> Request Id:{messageObject.Id}, New Status: {messageObject.NewStatus}");
+
+                _requestMessageObjects.ForEach(o =>
+                {
+                    if (o.Id == messageObject.Id)
+                    {
+                        o.Status = messageObject.NewStatus;
+                    }
+                });
+            }
         }
 
         #endregion Receivers

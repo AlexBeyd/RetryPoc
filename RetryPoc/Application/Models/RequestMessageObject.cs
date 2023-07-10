@@ -8,6 +8,6 @@ public class RequestMessageObject
     public int Id { get; set; }
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    public Guid MtoaId { get; set; }
+    public Guid MtoaId { get; set; } = Guid.Empty;
     public RequestStatus Status { get; set; }
 }
