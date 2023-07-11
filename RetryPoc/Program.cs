@@ -1,6 +1,4 @@
-using Microsoft.Extensions.DependencyInjection;
 using RetryPoc.Infrastructure;
-using System;
 
 var builder = WebApplication.CreateBuilder(args);
 
