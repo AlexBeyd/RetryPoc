@@ -6,5 +6,6 @@ public enum RequestStatus
     Started = 1,
     Pending = 2,
     MoreInformationNeeded = 3,
-    Completed = 4
+    Completed = 4,
+    OnHold = 5
 }

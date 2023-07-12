@@ -9,15 +9,15 @@ namespace RetryPocTests
         [Fact]
         public void Should_Restore_Failed_Object_By_TypeName()
         {
-            var obj = new FailedEventObject
+            var obj = new PendingEventObject
             {
-                FailedEventValue = JsonSerializer.Serialize(new RequestMessageObject { Id = 1 }),
-                FailedEventTypeName = typeof(RequestMessageObject).AssemblyQualifiedName
+                PendingEventValue = JsonSerializer.Serialize(new RequestMessageObject { Id = 1 }),
+                PendingEventTypeName = typeof(RequestMessageObject).AssemblyQualifiedName
             };
 
-            var theType = Type.GetType(obj.FailedEventTypeName);
+            var theType = Type.GetType(obj.PendingEventTypeName);
 
-            var theObject = JsonSerializer.Deserialize(obj.FailedEventValue, theType);
+            var theObject = JsonSerializer.Deserialize(obj.PendingEventValue, theType);
 
             theType.Should().NotBeNull();
 

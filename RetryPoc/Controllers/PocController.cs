@@ -14,10 +14,9 @@ namespace RetryPoc.Controllers
         private readonly ICapPublisher _capPublisher;
         private readonly IConfiguration _configuration;
         private static bool _isProcessingNewRequests = true;
-        private static int RequestId = 1;
 
         private static List<RequestMessageObject> _requestMessageObjects = new();
-        private static List<FailedEventObject> _failedEvents = new();
+        private static List<PendingEventObject> _pendingdEvents = new();
 
         public PocController(ICapPublisher capPublisher, IConfiguration configuration)
         {
@@ -28,9 +27,11 @@ namespace RetryPoc.Controllers
         [HttpPost("create-new-request")]
         public async Task<IActionResult> NewMessageRequestPublisher()
         {
+            var nextId = _requestMessageObjects.Any() ? _requestMessageObjects.Max(x => x.Id) + 1 : 0;
+
             var messageObject = new RequestMessageObject
             {
-                Id = RequestId++,
+                Id = nextId,
                 Status = RequestStatus.New
             };
 
@@ -72,10 +73,10 @@ namespace RetryPoc.Controllers
             return Ok(_requestMessageObjects);
         }
 
-        [HttpGet("list-failed-events")]
-        public IActionResult ListAllFailedEvents()
+        [HttpGet("list-pending-events")]
+        public IActionResult ListAllPendingEvents()
         {
-            return Ok(_failedEvents);
+            return Ok(_pendingdEvents);
         }
 
         #region Receivers
@@ -111,16 +112,16 @@ namespace RetryPoc.Controllers
                     });
 
                     //check if there are messages following the creation of the new request 
-                    var failedEventsOrdered = _failedEvents.Where(e => e.ParentRequestId == messageObject.Id).OrderBy(e => e.OrderInQueue).ToArray();
+                    var failedEventsOrdered = _pendingdEvents.Where(e => e.RelatedRequestId == messageObject.Id).OrderBy(e => e.OrderInQueue).ToArray();
 
                     foreach (var failedEvent in failedEventsOrdered)
                     {
                         await _capPublisher.PublishDelayAsync(
                            TimeSpan.FromSeconds(failedEvent.OrderInQueue * DelayIntervalSec),
                             failedEvent.TopicNameForPublish,
-                            JsonSerializer.Deserialize(failedEvent.FailedEventValue, Type.GetType(failedEvent.FailedEventTypeName)));
-                    
-                        _failedEvents.Remove(failedEvent);
+                            JsonSerializer.Deserialize(failedEvent.PendingEventValue, Type.GetType(failedEvent.PendingEventTypeName)));
+
+                        _pendingdEvents.Remove(failedEvent);
                     }
                 }
             }
@@ -144,27 +145,26 @@ namespace RetryPoc.Controllers
         {
             var methodName = "RequestStatusChangeReceiver";
 
-            if (_requestMessageObjects.Any(o => o.Id == messageObject.Id && o.MtoaId == Guid.Empty) ||
-                _failedEvents.Any(e => e.ParentRequestId == messageObject.Id))
+            if (_requestMessageObjects.Any(o => o.Id == messageObject.Id && o.MtoaId == Guid.Empty) || _pendingdEvents.Any(e => e.RelatedRequestId == messageObject.Id))
             {
                 //Case when the related request don't have MTOA ID or
                 //failed events list with related request Id exists
                 Console.WriteLine($"{methodName}: Request Id: {messageObject.Id} have no MTOA ID. The status change is impossible. Adding the change request to failed events.");
 
-                var currentMax = _failedEvents != null && _failedEvents.Any(o => o.ParentRequestId == messageObject.Id) ? _failedEvents.Where(o => o.ParentRequestId == messageObject.Id)?.Max(o => o.OrderInQueue) : 0;
+                var currentMax = _pendingdEvents != null && _pendingdEvents.Any(o => o.RelatedRequestId == messageObject.Id) ? _pendingdEvents.Where(o => o.RelatedRequestId == messageObject.Id)?.Max(o => o.OrderInQueue) : 0;
 
-                var failedEvent = new FailedEventObject
+                var failedEvent = new PendingEventObject
                 {
-                    ParentRequestId = messageObject.Id,
-                    FailedEventValue = JsonSerializer.Serialize(messageObject),
-                    FailedEventTypeName = messageObject.GetType().AssemblyQualifiedName,
+                    RelatedRequestId = messageObject.Id,
+                    PendingEventValue = JsonSerializer.Serialize(messageObject),
+                    PendingEventTypeName = messageObject.GetType().AssemblyQualifiedName,
                     TimeStamp = DateTimeOffset.Now,
                     OrderInQueue = (int)(currentMax != null ? currentMax + 1 : 0),
                     TopicNameForPublish = _configuration.GetValue<string>("Cap:RequestsChangeStatisTopicName")
                 };
 
-                _failedEvents ??= new();
-                _failedEvents.Add(failedEvent);
+                _pendingdEvents ??= new();
+                _pendingdEvents.Add(failedEvent);
             }
 
             else if (_requestMessageObjects.Any(o => o.Id == messageObject.Id))
