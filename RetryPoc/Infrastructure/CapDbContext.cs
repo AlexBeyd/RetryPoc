@@ -7,11 +7,18 @@ public class CapDbContext : DbContext, ICapDbContext
 {
     IConfiguration _config;
 
-    public DbSet<PendingEventObject> PendingEvents { get; } = null!;
+    public virtual DbSet<PendingEventObject> PendingEvents { get; set; } = null!;
 
     public CapDbContext(DbContextOptions<CapDbContext> options, IConfiguration config) : base(options)
     {
         _config = config;
+    }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<PendingEventObject>(e => e.HasKey(e => e.Id));
+
+        base.OnModelCreating(modelBuilder);
     }
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)

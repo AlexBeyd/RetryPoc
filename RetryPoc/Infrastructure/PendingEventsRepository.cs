@@ -28,7 +28,7 @@ public class PendingEventsRepository : IEventsRepository<PendingEventObject>
 
     public async Task<IEnumerable<PendingEventObject>> FindAsync(Func<PendingEventObject, bool> value)
     {
-        return await Task.Run(() => _pendingEventsContext.PendingEvents?.Where(value));
+        return await Task.Run(() => _pendingEventsContext.PendingEvents.Where(value));
     }
 
     public async Task<bool> IsFound(int id)

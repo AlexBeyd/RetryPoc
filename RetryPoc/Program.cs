@@ -20,7 +20,7 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 //services
-builder.Services.AddDbContext<ICapDbContext, CapDbContext>();
+builder.Services.AddDbContext<ICapDbContext, CapDbContext>(options => options.UseNpgsql(builder.Configuration.GetValue<string>("Cap:PostgreSqlConnectionString")));
 
 builder.Services.AddTransient<IEventsRepository<PendingEventObject>, PendingEventsRepository>();
 builder.Services.AddTransient<IFailSafeService, FailSafeService>();

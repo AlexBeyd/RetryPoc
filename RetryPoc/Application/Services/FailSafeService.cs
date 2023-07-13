@@ -32,9 +32,8 @@ namespace RetryPoc.Application.Services
                 RelatedRequestId = messageObject.Id,
                 PendingEventValue = JsonSerializer.Serialize(messageObject),
                 PendingEventTypeName = messageObject.GetType().AssemblyQualifiedName,
-                TimeStamp = DateTimeOffset.Now,
                 OrderInQueue = (int)(currentMax != null ? currentMax + 1 : 0),
-                TopicNameForPublish = _configuration.GetValue<string>("Cap:RequestsChangeStatisTopicName")
+                TopicNameForPublish = _configuration.GetValue<string>("Cap:RequestsChangeStatusTopicName")
             };
 
             return await _pendingEventsRepository.AddAsync(pendingEvent);
@@ -49,7 +48,7 @@ namespace RetryPoc.Application.Services
         {
             var messageObject = new RequestMessageObject
             {
-                Id = _requestMessageObjects.Any() ? _requestMessageObjects.Max(x => x.Id) + 1 : 0,
+                Id = _requestMessageObjects.Any() ? _requestMessageObjects.Max(x => x.Id) + 1 : 1,
                 Status = RequestStatus.New
             };
 
