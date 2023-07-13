@@ -1,10 +1,14 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using RetryPoc.Application.Contracts;
+using RetryPoc.Application.Models;
+using RetryPoc.Application.Services;
 using RetryPoc.Infrastructure;
 using Serilog;
 using System.Reflection;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
 #region Serilog
 builder.Services.AddLogging(loggingBuilder =>
       loggingBuilder.AddSerilog(dispose: true));
@@ -15,7 +19,11 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
-builder.Services.AddDbContext<CapDbContext>();
+//services
+builder.Services.AddDbContext<ICapDbContext, CapDbContext>();
+
+builder.Services.AddTransient<IEventsRepository<PendingEventObject>, PendingEventsRepository>();
+builder.Services.AddTransient<IFailSafeService, FailSafeService>();
 
 builder.Services.AddCap(x =>
 {

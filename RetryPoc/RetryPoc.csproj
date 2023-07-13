@@ -13,13 +13,12 @@
     <PackageReference Include="DotNetCore.CAP.PostgreSql" Version="7.1.4" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="7.0.7" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="7.0.8" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="7.0.4" />
     <PackageReference Include="Serilog.AspNetCore" Version="7.0.0" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.5.0" />
   </ItemGroup>
 
   <ItemGroup>
-    <Folder Include="Application\Contracts\" />
-    <Folder Include="Application\Services\" />
     <Folder Include="Domain\Entities\" />
   </ItemGroup>
 
